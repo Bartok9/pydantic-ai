@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -338,6 +339,28 @@ def test_safe_to_json_falls_back_on_lone_surrogates():
 
     assert safe_to_json({'a': [1, 'b']}) == snapshot(b'{"a":[1,"b"]}')
     assert safe_to_json('x\udce4y') == snapshot(b'"x\\udce4y"')
+
+
+def test_serialize_any_preserves_bytes_as_base64():
+    """Non-UTF-8 `bytes` must round-trip via base64, not degrade to a lossy `str()` repr.
+
+    `dump_python(mode='json')` raises on non-UTF-8 bytes; the old fallback returned
+    `str(value)` (the Python repr, e.g. `b'\\x89PNG...'`), irreversibly losing the data
+    in OTel traces. See https://github.com/pydantic/pydantic-ai/issues/5666.
+    """
+    from pydantic_ai._instrumentation import serialize_any
+
+    png_header = b'\x89PNG\r\n\x1a\nbinary content'
+    serialized = serialize_any(png_header)
+    assert serialized == snapshot('iVBORw0KGgpiaW5hcnkgY29udGVudA==')
+    # The result is a base64 string that decodes back to the original bytes, with no data loss.
+    assert base64.b64decode(serialized) == png_header
+
+    # `bytearray` is handled the same way.
+    assert serialize_any(bytearray(png_header)) == snapshot('iVBORw0KGgpiaW5hcnkgY29udGVudA==')
+
+    # UTF-8-decodable bytes continue to serialize via the primary path (unchanged behavior).
+    assert serialize_any(b'hello') == snapshot('hello')
 
 
 def test_instrumentation_settings_rejects_removed_version():

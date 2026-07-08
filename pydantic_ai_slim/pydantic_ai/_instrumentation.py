@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import itertools
 import json
 import warnings
@@ -105,6 +106,11 @@ def serialize_any(value: Any) -> str:
     try:
         return ANY_ADAPTER.dump_python(value, mode='json')
     except Exception:
+        # `dump_python(mode='json')` raises on non-UTF-8 `bytes`, so preserve the actual
+        # binary content as base64 instead of falling through to `str()`, which would emit
+        # the Python repr (e.g. `b'\x89PNG...'`) and irreversibly lose the data.
+        if isinstance(value, (bytes, bytearray)):
+            return base64.b64encode(value).decode()
         try:
             return str(value)
         except Exception as e:
