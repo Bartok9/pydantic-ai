@@ -539,10 +539,33 @@ def get_traceparent(x: AgentRun | AgentRunResult | GraphRun[Any, Any, Any]) -> s
 
 
 def dataclasses_no_defaults_repr(self: Any) -> str:
-    """Exclude fields with values equal to the field default."""
-    kv_pairs = (
-        f'{f.name}={getattr(self, f.name)!r}' for f in fields(self) if f.repr and getattr(self, f.name) != f.default
-    )
+    """Exclude fields with values equal to the field default.
+
+    Values whose ``!=`` does not return a plain ``bool`` (e.g. numpy arrays)
+    must not crash ``repr()``: treat the comparison as "show the field".
+    Required fields and fields with only a ``default_factory`` are always
+    shown, matching the previous ``val != dataclass.MISSING`` behavior without
+    calling ``default_factory`` (which would invent new instances and change
+    deterministic docstring examples).
+    """
+    from dataclasses import MISSING
+
+    kv_pairs: list[str] = []
+    for f in fields(self):
+        if not f.repr:
+            continue
+        val = getattr(self, f.name)
+        if f.default is MISSING:
+            # Required field, or field with only a default_factory.
+            # Previously always shown because value never equals MISSING.
+            show = True
+        else:
+            try:
+                show = bool(val != f.default)
+            except Exception:
+                show = True
+        if show:
+            kv_pairs.append(f'{f.name}={val!r}')
     return f'{self.__class__.__qualname__}({", ".join(kv_pairs)})'
 
 

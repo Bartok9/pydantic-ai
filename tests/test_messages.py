@@ -1791,6 +1791,48 @@ class TestInstructionParts:
         assert repr(dynamic_part) == "InstructionPart(content='world', dynamic=True)"
 
 
+def test_repr_handles_non_bool_ne_value():
+    """repr() must not raise when a field holds a value whose __ne__ returns a non-bool.
+
+    Regression for #6415: `dataclasses_no_defaults_repr` used ``val != f.default``
+    directly in an ``if``, which raises for numpy arrays (and any object whose
+    ``__ne__`` returns a non-bool with an exploding ``__bool__``).
+    """
+    from dataclasses import dataclass, field
+
+    from pydantic_ai._utils import dataclasses_no_defaults_repr
+
+    class NonBoolNe:
+        def __ne__(self, other: object) -> object:
+            return self
+
+        def __bool__(self) -> bool:
+            raise ValueError('ambiguous truth value of non-bool __ne__ result')
+
+        def __repr__(self) -> str:
+            return 'NonBoolNe()'
+
+    # Required field content=... used to compare against dataclasses.MISSING.
+    part = ToolReturnPart(tool_name='get_array', content=NonBoolNe())
+    nested = repr(ModelRequest(parts=[part]))
+    assert 'NonBoolNe()' in nested
+    assert 'get_array' in nested
+
+    @dataclass
+    class Sample:
+        required: object
+        optional: object = None
+        factory_list: list[object] = field(default_factory=list)
+        __repr__ = dataclasses_no_defaults_repr
+
+    # Defaulted field: value != default returns non-bool — must not raise.
+    sample = Sample(required='x', optional=NonBoolNe())
+    assert 'optional=NonBoolNe()' in repr(sample)
+    # default_factory fields must still appear without calling the factory again.
+    assert 'factory_list=[]' in repr(sample)
+    assert 'optional=None' not in repr(Sample(required='x'))
+
+
 def test_retry_prompt_strips_input_from_top_level_errors():
     """Top-level validation errors should not include `input` in model_response() since it duplicates the entire generated output."""
     part = RetryPromptPart(
