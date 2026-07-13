@@ -486,4 +486,19 @@ class OpenAIJsonSchemaTransformer(JsonSchemaTransformer):
                     for k in schema['properties'].keys():
                         if k not in required:
                             self.is_strict_compatible = False
+
+        if schema_type == 'array':
+            items = schema.get('items')
+            # Empty `items: {}` comes from bare `list` (no type params). OpenAI strict mode
+            # requires `items` to have a `type` key, so mark [strict=None] non-compatible
+            # and fall back to non-strict rather than 400. See #4425.
+            if isinstance(items, dict) and not items:
+                if self.strict is True:
+                    # Under forced strict we can't invent an item type safely; leave payload
+                    # alone but describing the restriction keeps the schema inspectable.
+                    description = schema.get('description')
+                    note = 'items={} is not strict-compatible (bare list); OpenAI requires items.type'
+                    schema['description'] = note if not description else f'{description} ({note})'
+                self.is_strict_compatible = False
+
         return schema
